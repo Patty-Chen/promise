@@ -1,14 +1,19 @@
-const asyncCall = function(callee) {
+let asyncCall = function(callee) {
+  let retval
+  let _callee = callee
   if (typeof (callee) !== 'function') {return}
   if (typeof (process) === 'object' && process !== null && typeof(process.nextTick) === 'function'){
-    process.nextTick(callee)
+    process.nextTick(()=>{
+      retval = _callee()
+    })
   }
-  if (typeof (setImmediate) === 'function'){
+  else if (typeof (setImmediate) === 'function'){
     setImmediate(callee)
   }
   else{
     setTimeout(callee,0)
   }
+  return retval
 }
 
 const enumState = {PENDING:'pending',FULFILLED:'fulfilled',REJECTED:'rejected'}
@@ -33,22 +38,25 @@ function myPromise(executor) {
 }
 
 function runPromiseFSM(srcPromise, event, data){
+  //console.log('runPromiseFSM')
+  //console.log(srcPromise,event,data)
   if (srcPromise.state !== enumState.PENDING){return}
 
   if (event === enumEvent.RESOLVE && srcPromise.onResolved){
+    //console.log('fsm run callback')
     srcPromise.state = enumState.FULFILLED
-    srcPromise.onResolved(data)
-
-    //asyncCall(srcPromise.onResolved.bind(null, data))
+    //srcPromise.onResolved(data)
+    asyncCall(srcPromise.onResolved.bind(srcPromise, data))
   }
   else if (event === enumEvent.RESOLVE && !srcPromise.onResolved){
+    //console.log('fsm run resolve')
     srcPromise.state = enumState.FULFILLED
     srcPromise.data = data
   }
   else if (event === enumEvent.REJECT && srcPromise.onRejected){
     srcPromise.state = enumState.REJECTED
-    srcPromise.onRejected(data)
-    //asyncCall(srcPromise.onRejected.bind(null, data))
+    //srcPromise.onRejected(data)
+    asyncCall(srcPromise.onRejected.bind(srcPromise, data))
   }
   else if (event === enumEvent.REJECT && !srcPromise.onRejected){
     srcPromise.state = enumState.REJECTED
@@ -59,18 +67,19 @@ function runPromiseFSM(srcPromise, event, data){
 myPromise.prototype.then = function(onResolved,onRejected){
   let self = this
   let data = this.data
-
+  //console.log('then')
   onResolved = typeof(onResolved) === 'function' ? onResolved : null
   onRejected = typeof(onRejected) === 'function' ? onRejected : null
 
   if (this.state === enumState.PENDING){
+    //console.log('pending')
     return new myPromise(function(resolve,reject){
       self.onResolved = function(value){
         try{
           let x
           if (onResolved){
-            //x = asyncCall(onResolved.bind(null, data))
-            x = onResolved(value)
+            x = asyncCall(onResolved.bind(self, value))
+            //x = onResolved(value)
           }
           else{
             resolve(value)
@@ -94,8 +103,8 @@ myPromise.prototype.then = function(onResolved,onRejected){
         try{
           let x
           if (onRejected) {
-            //x = asynCall(onRejected.bind(null, data))
-            x = onRejected(reason)
+            x = asyncCall(onRejected.bind(self, reason))
+            //x = onRejected(reason)
           }
           else{
             reject(reason)
@@ -118,13 +127,13 @@ myPromise.prototype.then = function(onResolved,onRejected){
     })
   }
   else if (this.state === enumState.FULFILLED){
-    console.log('FULFILLED')
+    //console.log('FULFILLED')
     return new myPromise(function(resolve,reject){
       try{
-        let x
+        let x = null
         if (onResolved){
-          //x = asyncCall(onResolved.bind(null, data))
-          x = onResolved(data)
+          x = asyncCall(onResolved.bind(self, data))
+          //x = onResolved(data)
         }
         else{
           resolve(data)
@@ -138,6 +147,7 @@ myPromise.prototype.then = function(onResolved,onRejected){
           x.then(resolve,reject)
         }
         else{
+          console.log('fullfilled resolved')
           resolve(x)
         }
       }
@@ -148,13 +158,13 @@ myPromise.prototype.then = function(onResolved,onRejected){
     })
   }
   else if (this.state === enumState.REJECTED){
-    console.log('rejected')
+    //console.log('rejected')
     return new myPromise(function(resolve,reject){
       try{
         let x
         if (onRejected){
-          //x = asyncCall(onRejected.bind(null, data))
-          x = onRejected(data)
+          x = asyncCall(onRejected.bind(self, data))
+          //x = onRejected(data)
         }
         else{
           reject(data)
@@ -191,4 +201,3 @@ adapter = {
 if (module && 'exports' in module) {
   module.exports = adapter;
 }
-
