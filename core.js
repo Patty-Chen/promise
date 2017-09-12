@@ -1,19 +1,20 @@
-let asyncCall = function(callee) {
-  let retval
-  let _callee = callee
+let asyncCall = function(callee, arg, retval) {
   if (typeof (callee) !== 'function') {return}
   if (typeof (process) === 'object' && process !== null && typeof(process.nextTick) === 'function'){
     process.nextTick(()=>{
-      retval = _callee()
-    })
+      retval.x = callee(arg)
+  })
   }
   else if (typeof (setImmediate) === 'function'){
-    setImmediate(callee)
+    setImmediate(()=>{
+      retval.x = callee(arg)
+  })
   }
   else{
-    setTimeout(callee,0)
+    setTimeout(()=>{
+      retval.x = callee(arg)
+  },0)
   }
-  return retval
 }
 
 const enumState = {PENDING:'pending',FULFILLED:'fulfilled',REJECTED:'rejected'}
@@ -22,8 +23,8 @@ const enumEvent = {RESOLVE:'resolve',REJECT:'reject'}
 function myPromise(executor) {
   this.state = enumState.PENDING
   this.data = undefined
-  this.onResolved = undefined
-  this.onRejected = undefined
+  this.onResolvedCallbacks = []
+  this.onRejectedCallbacks = []
 
   this.resolve = (value) => {
     runPromiseFSM(this, enumEvent.RESOLVE, value)
@@ -40,27 +41,43 @@ function myPromise(executor) {
 function runPromiseFSM(srcPromise, event, data){
   //console.log('runPromiseFSM')
   //console.log(srcPromise,event,data)
-  if (srcPromise.state !== enumState.PENDING){return}
+  try {
+    if (srcPromise.state !== enumState.PENDING) {
+      return
+    }
 
-  if (event === enumEvent.RESOLVE && srcPromise.onResolved){
-    //console.log('fsm run callback')
-    srcPromise.state = enumState.FULFILLED
-    //srcPromise.onResolved(data)
-    asyncCall(srcPromise.onResolved.bind(srcPromise, data))
+    if (event === enumEvent.RESOLVE && srcPromise.onResolvedCallbacks.length !== 0) {
+      //console.log('fsm run callback')
+      srcPromise.state = enumState.FULFILLED
+      //srcPromise.onResolved(data)
+      srcPromise.onResolvedCallbacks.forEach((callback) => {
+        let asyncRetval = {}
+        asyncCall(callback, data, asyncRetval)
+      }
+    )
+
+    }
+    else if (event === enumEvent.RESOLVE && srcPromise.onResolvedCallbacks.length === 0) {
+      //console.log('fsm run resolve')
+      srcPromise.state = enumState.FULFILLED
+      srcPromise.data = data
+    }
+    else if (event === enumEvent.REJECT && srcPromise.onRejectedCallbacks.length !== 0) {
+      srcPromise.state = enumState.REJECTED
+      //srcPromise.onRejected(data)
+      srcPromise.onRejectedCallbacks.forEach((callback) => {
+        let asyncRetval = {}
+        asyncCall(callback, data, asyncRetval)
+      }
+    )
+    }
+    else if (event === enumEvent.REJECT && srcPromise.onRejectedCallbacks.length === 0) {
+      srcPromise.state = enumState.REJECTED
+      srcPromise.data = data
+    }
   }
-  else if (event === enumEvent.RESOLVE && !srcPromise.onResolved){
-    //console.log('fsm run resolve')
-    srcPromise.state = enumState.FULFILLED
-    srcPromise.data = data
-  }
-  else if (event === enumEvent.REJECT && srcPromise.onRejected){
-    srcPromise.state = enumState.REJECTED
-    //srcPromise.onRejected(data)
-    asyncCall(srcPromise.onRejected.bind(srcPromise, data))
-  }
-  else if (event === enumEvent.REJECT && !srcPromise.onRejected){
-    srcPromise.state = enumState.REJECTED
-    srcPromise.data = data
+  catch (exception){
+    console.log(exception)
   }
 }
 
@@ -74,85 +91,110 @@ myPromise.prototype.then = function(onResolved,onRejected){
   if (this.state === enumState.PENDING){
     //console.log('pending')
     return new myPromise(function(resolve,reject){
-      self.onResolved = function(value){
+      self.onResolvedCallbacks.push(function(value){
         try{
-          let x
+          let asyncRetval = {x:undefined};
           if (onResolved){
-            x = asyncCall(onResolved.bind(self, value))
+            asyncCall((arg)=>{
+              try{
+                return onResolved(arg)
+              }
+              catch(exception){
+                reject(exception)
+              }
+            }, value, asyncRetval)
             //x = onResolved(value)
           }
           else{
             resolve(value)
             return
           }
-          if (x === self){
+          asyncCall(()=>{
+            if (asyncRetval.x === self){
             throw new TypeError('then is not allowed to return the promise itself')
           }
-          if (x instanceof myPromise){
-            x.then(resolve,reject)
+          if (asyncRetval.x instanceof myPromise){
+            asyncRetval.x.then(resolve,reject)
           }
           else{
-            resolve(x)
+            resolve(asyncRetval.x)
           }
+        },undefined,{})
         }
         catch(exception){
           reject(exception)
         }
-      }
-      self.onRejected = function(reason){
+      })
+      self.onRejectedCallbacks.push(function(reason){
         try{
-          let x
-          if (onRejected) {
-            x = asyncCall(onRejected.bind(self, reason))
-            //x = onRejected(reason)
+          let asyncRetval = {x:undefined};
+          if (onRejected){
+            asyncCall((arg)=>{
+              try{
+                return onRejected(arg)
+              }
+              catch(exception){
+                reject(exception)
+              }
+            }, reason, asyncRetval)
+            //x = onResolved(value)
           }
           else{
             reject(reason)
             return
           }
-          if (x === self){
+          asyncCall(()=>{
+            if (asyncRetval.x === self){
             throw new TypeError('then is not allowed to return the promise itself')
           }
-          if(x instanceof myPromise){
-            x.then(resolve,reject)
+          if (asyncRetval.x instanceof myPromise){
+            asyncRetval.x.then(resolve,reject)
           }
           else{
-            resolve(x)
+            resolve(asyncRetval.x)
           }
+        },undefined,{})
         }
         catch(exception){
           reject(exception)
         }
-      }
+      })
     })
   }
   else if (this.state === enumState.FULFILLED){
     //console.log('FULFILLED')
     return new myPromise(function(resolve,reject){
       try{
-        let x = null
+        let asyncRetval = {x:undefined};
         if (onResolved){
-          x = asyncCall(onResolved.bind(self, data))
-          //x = onResolved(data)
+          asyncCall((arg)=>{
+            try{
+              return onResolved(arg)
+            }
+            catch(exception){
+              reject(exception)
+            }
+          }, data, asyncRetval)
+          //x = onResolved(value)
         }
         else{
           resolve(data)
           return
         }
-        console.log(x)
-        if (x === self){
+        asyncCall(()=>{
+          if (asyncRetval.x === self){
           throw new TypeError('then is not allowed to return the promise itself')
         }
-        if (x instanceof myPromise){
-          x.then(resolve,reject)
+        if (asyncRetval.x instanceof myPromise){
+          asyncRetval.x.then(resolve,reject)
         }
         else{
-          console.log('fullfilled resolved')
-          resolve(x)
+          resolve(asyncRetval.x)
         }
+      },undefined,{})
       }
       catch(exception){
-        comsole.log(exception)
+        console.log(exception)
         reject(exception)
       }
     })
@@ -161,24 +203,33 @@ myPromise.prototype.then = function(onResolved,onRejected){
     //console.log('rejected')
     return new myPromise(function(resolve,reject){
       try{
-        let x
+        let asyncRetval = {x:undefined};
         if (onRejected){
-          x = asyncCall(onRejected.bind(self, data))
-          //x = onRejected(data)
+          asyncCall((arg)=>{
+            try{
+              return onRejected(arg)
+            }
+            catch(exception){
+              reject(exception)
+            }
+          }, data, asyncRetval)
+          //x = onResolved(value)
         }
         else{
           reject(data)
           return
         }
-        if (x === self){
+        asyncCall(()=>{
+          if (asyncRetval.x === self){
           throw new TypeError('then is not allowed to return the promise itself')
         }
-        if (x instanceof myPromise){
-          x.then(resolve,reject)
+        if (asyncRetval.x instanceof myPromise){
+          asyncRetval.x.then(resolve,reject)
         }
         else{
-          resolve(x)
+          resolve(asyncRetval.x)
         }
+      },undefined,{})
       }
       catch(exception){
         reject(exception)
