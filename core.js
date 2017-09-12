@@ -28,16 +28,51 @@ let excuteCallback = function (callback, arg, retval, reject){
   }, arg, retval)
 }
 
-let afterCallback = function (xReturned, oldPromise, resolve, reject){
-  if (xReturned instanceof myPromise){
-    if (xReturned === oldPromise){
-      throw new TypeError('then is not allowed to return the promise itself')
+let runResolutionProcedure = function (xReturned, oldPromise, resolve, reject){
+  try{
+    if (xReturned instanceof myPromise){
+      if (xReturned === oldPromise){
+        throw new TypeError('then is not allowed to return the promise itself')
+      }
+      xReturned.then(resolve,reject)
     }
-    xReturned.then(resolve,reject)
+    else if (typeof (xReturned) === 'function' || (typeof (xReturned) === 'object' && xReturned !== null)){
+      let then = xReturned.then
+      if (typeof(then) === 'function'){
+        let isProcessed = false
+        try{
+          let resolvePromise = (y)=>{
+            if (isProcessed === false){
+              isProcessed = true
+              runResolutionProcedure(y,null,resolve,reject)
+            }
+          }
+          then.call(xReturned, resolvePromise, (r)=>{
+            if (isProcessed === false){
+            isProcessed = true
+            reject(r)
+          }
+        })
+        }
+        catch (exception){
+          if (isProcessed === false){
+            isProcessed = true
+            reject(exception)
+          }
+        }
+      }
+      else{
+        resolve(xReturned)
+      }
+    }
+    else{
+      resolve(xReturned)
+    }
   }
-  else{
-    resolve(xReturned)
+  catch (exception){
+    reject(exception)
   }
+
 }
 const enumState = {PENDING:'pending',FULFILLED:'fulfilled',REJECTED:'rejected'}
 const enumEvent = {RESOLVE:'resolve',REJECT:'reject'}
@@ -61,8 +96,6 @@ function myPromise(executor) {
 }
 
 function runPromiseFSM(srcPromise, event, data){
-  //console.log('runPromiseFSM')
-  //console.log(srcPromise,event,data)
   try {
     if (srcPromise.state !== enumState.PENDING) {
       return
@@ -75,18 +108,15 @@ function runPromiseFSM(srcPromise, event, data){
       srcPromise.onResolvedCallbacks.forEach((callback) => {
         let asyncRetval = {}
         asyncCall(callback, data, asyncRetval)
-      }
-    )
+      })
 
     }
     else if (event === enumEvent.RESOLVE && srcPromise.onResolvedCallbacks.length === 0) {
-      //console.log('fsm run resolve')
       srcPromise.state = enumState.FULFILLED
       srcPromise.data = data
     }
     else if (event === enumEvent.REJECT && srcPromise.onRejectedCallbacks.length !== 0) {
       srcPromise.state = enumState.REJECTED
-      //srcPromise.onRejected(data)
       srcPromise.onRejectedCallbacks.forEach((callback) => {
         let asyncRetval = {}
         asyncCall(callback, data, asyncRetval)
@@ -99,6 +129,7 @@ function runPromiseFSM(srcPromise, event, data){
     }
   }
   catch (exception){
+    reject(exception)
     console.log(exception)
   }
 }
@@ -110,14 +141,15 @@ myPromise.prototype.then = function(onResolved,onRejected){
   onRejected = typeof(onRejected) === 'function' ? onRejected : null
 
   if (this.state === enumState.PENDING){
-    return new myPromise(function(resolve,reject){
+    let thisPromise = new myPromise(function(resolve,reject){
+      let thisPromise = this
       self.onResolvedCallbacks.push(function(value){
         try{
           let asyncRetval = {x:undefined};
           if (onResolved){
             excuteCallback(onResolved, value, asyncRetval, reject)
             asyncCall(()=>{
-              afterCallback(asyncRetval.x, self, resolve, reject)
+              runResolutionProcedure(asyncRetval.x, thisPromise, resolve, reject)
           })
           }
           else{
@@ -135,7 +167,7 @@ myPromise.prototype.then = function(onResolved,onRejected){
           if (onRejected){
             excuteCallback(onRejected, reason, asyncRetval, reject)
             asyncCall(()=>{
-              afterCallback(asyncRetval.x, self, resolve, reject)
+              runResolutionProcedure(asyncRetval.x, thisPromise, resolve, reject)
           })
           }
           else{
@@ -148,15 +180,16 @@ myPromise.prototype.then = function(onResolved,onRejected){
         }
       })
     })
+    return thisPromise
   }
   else if (this.state === enumState.FULFILLED){
-    return new myPromise(function(resolve,reject){
+    let thisPromise = new myPromise(function(resolve,reject){
       try{
         let asyncRetval = {x:undefined};
         if (onResolved){
           excuteCallback(onResolved, data, asyncRetval, reject)
           asyncCall(()=>{
-            afterCallback(asyncRetval.x, self, resolve, reject)
+            runResolutionProcedure(asyncRetval.x, thisPromise, resolve, reject)
         })
         }
         else{
@@ -165,19 +198,19 @@ myPromise.prototype.then = function(onResolved,onRejected){
         }
       }
       catch(exception){
-        console.log(exception)
         reject(exception)
       }
     })
+    return thisPromise
   }
   else if (this.state === enumState.REJECTED){
-    return new myPromise(function(resolve,reject){
+    let thisPromise = new myPromise(function(resolve,reject){
       try{
         let asyncRetval = {x:undefined};
         if (onRejected){
           excuteCallback(onRejected, data, asyncRetval, reject)
           asyncCall(()=>{
-            afterCallback(asyncRetval.x, self, resolve, reject)
+            runResolutionProcedure(asyncRetval.x, thisPromise, resolve, reject)
         })
         }
         else{
@@ -189,6 +222,7 @@ myPromise.prototype.then = function(onResolved,onRejected){
         reject(exception)
       }
     })
+    return thisPromise
   }
 }
 
