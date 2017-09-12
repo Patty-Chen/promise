@@ -1,4 +1,5 @@
 let asyncCall = function(callee, arg, retval) {
+  retval = retval || {}
   if (typeof (callee) !== 'function') {return}
   if (typeof (process) === 'object' && process !== null && typeof(process.nextTick) === 'function'){
     process.nextTick(()=>{
@@ -16,7 +17,28 @@ let asyncCall = function(callee, arg, retval) {
   },0)
   }
 }
+let excuteCallback = function (callback, arg, retval, reject){
+  asyncCall((arg)=>{
+    try{
+      return callback(arg)
+    }
+    catch(exception){
+      reject(exception)
+    }
+  }, arg, retval)
+}
 
+let afterCallback = function (xReturned, oldPromise, resolve, reject){
+  if (xReturned instanceof myPromise){
+    if (xReturned === oldPromise){
+      throw new TypeError('then is not allowed to return the promise itself')
+    }
+    xReturned.then(resolve,reject)
+  }
+  else{
+    resolve(xReturned)
+  }
+}
 const enumState = {PENDING:'pending',FULFILLED:'fulfilled',REJECTED:'rejected'}
 const enumEvent = {RESOLVE:'resolve',REJECT:'reject'}
 
@@ -84,42 +106,24 @@ function runPromiseFSM(srcPromise, event, data){
 myPromise.prototype.then = function(onResolved,onRejected){
   let self = this
   let data = this.data
-  //console.log('then')
   onResolved = typeof(onResolved) === 'function' ? onResolved : null
   onRejected = typeof(onRejected) === 'function' ? onRejected : null
 
   if (this.state === enumState.PENDING){
-    //console.log('pending')
     return new myPromise(function(resolve,reject){
       self.onResolvedCallbacks.push(function(value){
         try{
           let asyncRetval = {x:undefined};
           if (onResolved){
-            asyncCall((arg)=>{
-              try{
-                return onResolved(arg)
-              }
-              catch(exception){
-                reject(exception)
-              }
-            }, value, asyncRetval)
-            //x = onResolved(value)
+            excuteCallback(onResolved, value, asyncRetval, reject)
+            asyncCall(()=>{
+              afterCallback(asyncRetval.x, self, resolve, reject)
+          })
           }
           else{
             resolve(value)
             return
           }
-          asyncCall(()=>{
-            if (asyncRetval.x === self){
-            throw new TypeError('then is not allowed to return the promise itself')
-          }
-          if (asyncRetval.x instanceof myPromise){
-            asyncRetval.x.then(resolve,reject)
-          }
-          else{
-            resolve(asyncRetval.x)
-          }
-        },undefined,{})
         }
         catch(exception){
           reject(exception)
@@ -129,31 +133,15 @@ myPromise.prototype.then = function(onResolved,onRejected){
         try{
           let asyncRetval = {x:undefined};
           if (onRejected){
-            asyncCall((arg)=>{
-              try{
-                return onRejected(arg)
-              }
-              catch(exception){
-                reject(exception)
-              }
-            }, reason, asyncRetval)
-            //x = onResolved(value)
+            excuteCallback(onRejected, reason, asyncRetval, reject)
+            asyncCall(()=>{
+              afterCallback(asyncRetval.x, self, resolve, reject)
+          })
           }
           else{
             reject(reason)
             return
           }
-          asyncCall(()=>{
-            if (asyncRetval.x === self){
-            throw new TypeError('then is not allowed to return the promise itself')
-          }
-          if (asyncRetval.x instanceof myPromise){
-            asyncRetval.x.then(resolve,reject)
-          }
-          else{
-            resolve(asyncRetval.x)
-          }
-        },undefined,{})
         }
         catch(exception){
           reject(exception)
@@ -162,36 +150,19 @@ myPromise.prototype.then = function(onResolved,onRejected){
     })
   }
   else if (this.state === enumState.FULFILLED){
-    //console.log('FULFILLED')
     return new myPromise(function(resolve,reject){
       try{
         let asyncRetval = {x:undefined};
         if (onResolved){
-          asyncCall((arg)=>{
-            try{
-              return onResolved(arg)
-            }
-            catch(exception){
-              reject(exception)
-            }
-          }, data, asyncRetval)
-          //x = onResolved(value)
+          excuteCallback(onResolved, data, asyncRetval, reject)
+          asyncCall(()=>{
+            afterCallback(asyncRetval.x, self, resolve, reject)
+        })
         }
         else{
           resolve(data)
           return
         }
-        asyncCall(()=>{
-          if (asyncRetval.x === self){
-          throw new TypeError('then is not allowed to return the promise itself')
-        }
-        if (asyncRetval.x instanceof myPromise){
-          asyncRetval.x.then(resolve,reject)
-        }
-        else{
-          resolve(asyncRetval.x)
-        }
-      },undefined,{})
       }
       catch(exception){
         console.log(exception)
@@ -200,36 +171,19 @@ myPromise.prototype.then = function(onResolved,onRejected){
     })
   }
   else if (this.state === enumState.REJECTED){
-    //console.log('rejected')
     return new myPromise(function(resolve,reject){
       try{
         let asyncRetval = {x:undefined};
         if (onRejected){
-          asyncCall((arg)=>{
-            try{
-              return onRejected(arg)
-            }
-            catch(exception){
-              reject(exception)
-            }
-          }, data, asyncRetval)
-          //x = onResolved(value)
+          excuteCallback(onRejected, data, asyncRetval, reject)
+          asyncCall(()=>{
+            afterCallback(asyncRetval.x, self, resolve, reject)
+        })
         }
         else{
           reject(data)
           return
         }
-        asyncCall(()=>{
-          if (asyncRetval.x === self){
-          throw new TypeError('then is not allowed to return the promise itself')
-        }
-        if (asyncRetval.x instanceof myPromise){
-          asyncRetval.x.then(resolve,reject)
-        }
-        else{
-          resolve(asyncRetval.x)
-        }
-      },undefined,{})
       }
       catch(exception){
         reject(exception)
